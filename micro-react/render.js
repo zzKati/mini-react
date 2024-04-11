@@ -1,11 +1,17 @@
-function render(element, container) {
+function createDOM(fiber) {
     // 创建 dom 节点
-    const dom = element.type === 'TEXT_ELEMENT' ? document.createTextNode('') : document.createElement(element.type)
+    const dom = fiber.type === 'TEXT_ELEMENT' ? document.createTextNode('') : document.createElement(fiber.type)
 
     // 解析props中除了children外的属性 并将属性赋值给dom
-    Object.keys(element.props).filter(prop => prop !== 'children').forEach(key => {
-        dom[key] = element.props[key]
+    Object.keys(fiber.props).filter(prop => prop !== 'children').forEach(key => {
+        dom[key] = fiber.props[key]
     })
+
+    return dom
+}
+
+// 初始化第一个fiber并调用工作
+function render(element, container) {
 
     // // 递归渲染children节点
     // element.props.children.forEach(child => {
@@ -20,7 +26,18 @@ function render(element, container) {
      * 但react官方不再使用这个API 转而使用scheduler package
      */
 
-    container.appendChild(dom)
+    // 将containe作为Fibers Tree的根(root)
+    nextUnitOfWork = {
+        dom: container,
+        props: {
+            children: [element]
+        },
+        parent: null,
+        sibling: null,
+        child: null
+    }
+    // 浏览器即将开始workLoop
+
 }
 
 // 下次渲染工作 在render中初始化
@@ -49,8 +66,56 @@ function workLoop(deadLine) {
 requestIdleCallback(workLoop)
 
 // 执行工作函数
-function performUnitOfWork() {
+function performUnitOfWork(fiber) {
 
+    // 创建fiber的dom节点
+    if (!fiber.dom) {
+        fiber.dom = createDOM(fiber)
+    }
+
+    // 将fiber添加到其父元素中
+    if (fiber.parent) {
+        fiber.parent.dom.appendChild(fiber.dom)
+    }
+
+    let prevFiber = null
+
+    // 为children创建fiber
+    const children = fiber.props.children
+    for (let i = 0; i < children.length; i++) {
+        const newFiber = {
+            dom: null,
+            type: children[i].type,
+            props: children[i].props,
+            child: null,
+            parent: fiber,
+            sibling: null
+        }
+
+        if (i === 0) {
+            // 如果是第一个孩子 则为children
+            fiber.child = newFiber
+        } else {
+            // 如果不是 只能为兄弟
+            prevFiber.sibling = newFiber
+        }
+        prevFiber = newFiber
+    }
+
+    // 优先返回 children
+    if (fiber.child) {
+        return fiber.child
+    }
+
+    let nextFiber = fiber
+    while (nextFiber) {
+        if (nextFiber.sibling) {
+            // 有兄弟返回兄弟
+            return nextFiber.sibling
+        }
+        // 没有兄弟返回父母 
+        nextFiber = nextFiber.parent
+    }
 }
 
 
