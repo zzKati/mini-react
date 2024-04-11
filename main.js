@@ -1,16 +1,21 @@
-import { createElement } from "./micro-react";
+import { createElement, render } from "./micro-react";
 
-const testNode = createElement(
+const element = createElement(
     'h1',
     {
-        title: 'foo'
+        title: 'foo',
+        style: 'background:skyblue'
     },
-    'aaa',
+    'Hello World',
     createElement(
         'div',
-        {},
-        'hahaha'
+        {
+            style: "color:red"
+        },
+        'test'
     )
 )
 
-console.log(testNode);
+
+
+render(element, document.getElementById('app'))
