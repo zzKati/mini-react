@@ -10,6 +10,23 @@ function createDOM(fiber) {
     return dom
 }
 
+// commit阶段 渲染界面
+function commitRoot() {
+    commitWork(wipRoot.child)
+}
+
+function commitWork(fiber) {
+    if (!fiber) return
+
+    const parentDOM = fiber.parent.dom
+    parentDOM.appendChild(fiber.dom)
+
+    // 以下操作二选一 
+    commitWork(fiber.child)
+    commitWork(fiber.sibling)
+
+}
+
 // 初始化第一个fiber并调用工作
 function render(element, container) {
 
@@ -27,7 +44,7 @@ function render(element, container) {
      */
 
     // 将containe作为Fibers Tree的根(root)
-    nextUnitOfWork = {
+    wipRoot = {
         dom: container,
         props: {
             children: [element]
@@ -37,8 +54,11 @@ function render(element, container) {
         child: null
     }
     // 浏览器即将开始workLoop
-
+    nextUnitOfWork = wipRoot
 }
+
+// 根节点
+let wipRoot = null
 
 // 下次渲染工作 在render中初始化
 let nextUnitOfWork = null
@@ -61,6 +81,11 @@ function workLoop(deadLine) {
 
     // 等待浏览器下次空闲时调用
     requestIdleCallback(workLoop)
+
+    // 如果没有下次渲染任务并且存在root 表示已经渲染完毕
+    if (!nextUnitOfWork && wipRoot) {
+        commitRoot()
+    }
 }
 
 requestIdleCallback(workLoop)
@@ -74,9 +99,13 @@ function performUnitOfWork(fiber) {
     }
 
     // 将fiber添加到其父元素中
-    if (fiber.parent) {
-        fiber.parent.dom.appendChild(fiber.dom)
-    }
+    // if (fiber.parent) {
+    //     fiber.parent.dom.appendChild(fiber.dom)
+    // }
+    /**
+     * 由于performUnitOfWork是会被打断的
+     * 为了确保界面一次性画完 就不能使用以上的方式来添加dom节点
+     */
 
     let prevFiber = null
 
