@@ -12,19 +12,64 @@ function createDOM(fiber) {
 
 // commit阶段 渲染界面
 function commitRoot() {
+    deletions.forEach(commitWork)
     commitWork(wipRoot.child)
+    currentRoot = wipRoot
+    wipRoot = null
 }
 
 function commitWork(fiber) {
     if (!fiber) return
 
     const parentDOM = fiber.parent.dom
-    parentDOM.appendChild(fiber.dom)
+    // parentDOM.appendChild(fiber.dom)
+    if (fiber.effectTag === "PLACEMENT" && fiber.dom) {
+        // 新节点
+        parentDOM.appendChild(fiber.dom)
+    } else if (fiber.effectTag === "DELETIONS" && fiber.dom) {
+        parentDOM.removeChild(fiber.dom)
+    } else if (fiber.effectTag === "UPDATE" && fiber.dom) {
+        updateDOM(fiber.dom, fiber.alternate.props, fiber.props)
+    }
 
-    // 以下操作二选一 
+    // 以下操作二选一   
     commitWork(fiber.child)
     commitWork(fiber.sibling)
+}
 
+function updateDOM(dom, prevProps, nextProps) {
+    const isEvent = key => key.startsWith('on') // 以on开头的props为事件
+    // 删除 没有的或发生改变的事件处理函数
+    Object.keys(prevProps).filter(isEvent)
+        .filter(key => !key in nextProps || nextProps[key] !== prevProps[key])
+        .forEach(key => {
+            const eventType = key.toLocaleLowerCase().substring(2) //获取事件的类型
+            dom.removeEventListener(eventType, prevProps[key])
+        })
+
+
+    // 添加 发生改变的或新增的事件处理函数
+    Object.keys(nextProps).filter(isEvent)
+        .filter(key => nextProps[key] !== prevProps[key])
+        .forEach(key => {
+            const eventType = key.toLocaleLowerCase().substring(2) //获取事件的类型
+            dom.addEventListener(eventType, nextProps[key])
+        })
+
+    // 删除 nextProps中没有的props
+    Object.keys(prevProps).filter(key => key !== 'children')
+        .filter(key => !key in nextProps)
+        .forEach(key => {
+            dom[key] = ''
+        })
+
+
+    // 添加 新的或改变的props
+    Object.keys(nextProps).filter(key => key !== 'children')
+        .filter(key => !key in prevProps || prevProps[key] !== nextProps[key])
+        .forEach(key => {
+            dom[key] = nextProps[key]
+        })
 }
 
 // 初始化第一个fiber并调用工作
@@ -51,9 +96,11 @@ function render(element, container) {
         },
         parent: null,
         sibling: null,
-        child: null
+        child: null,
+        alternate: currentRoot
     }
     // 浏览器即将开始workLoop
+    deletions = []
     nextUnitOfWork = wipRoot
 }
 
@@ -62,6 +109,12 @@ let wipRoot = null
 
 // 下次渲染工作 在render中初始化
 let nextUnitOfWork = null
+
+// 保存上一次的root diffing算法时会使用
+let currentRoot = null
+
+// 需要删除的节点
+let deletions = null
 
 /**
  * // 调度工作函数
@@ -90,9 +143,80 @@ function workLoop(deadLine) {
 
 requestIdleCallback(workLoop)
 
+
+// diffing函数 优化创建fiber的过程
+function reconcileChildren(wipFiber, elements) {
+    let index = 0
+
+    // 旧的Fiber
+    let oldFiber = wipFiber.alternate && wipFiber.alternate.child
+
+    let prevFiber = null
+
+    while (index < elements.length || oldFiber) {
+        /**
+         *  首先对比type 是否相等:
+         *      - 如果type相等: 只更新props
+         *      - 如果type不等且多了一个元素:添加一个新元素
+         *      - 如果type不等且少了一个元素:删除一个元素
+         * 
+         */
+        const element = elements[index]
+        const sameType = element && oldFiber && element.type === oldFiber.type
+        let newFiber = null
+
+        if (sameType) {
+            // 更新props
+            newFiber = {
+                type: oldFiber.type,
+                props: element.props,
+                dom: oldFiber.dom,
+                parent: wipFiber,
+                // child: null,
+                alternate: oldFiber,
+                // sibling: null,
+                effectTag: "UPDATE"
+            }
+        }
+        if (element && !sameType) {
+            // 添加新节点
+            newFiber = {
+                type: element.type,
+                props: element.props,
+                parent: wipFiber,
+                dom: null,
+                // child: null,
+                alternate: null,
+                // sibling: null,
+                effectTag: "PLACEMENT"
+            }
+        }
+        if (oldFiber && !sameType) {
+            //删除旧节点
+            oldFiber.effectTag = "DELETION"
+            deletions.push(oldFiber)
+        }
+
+        if (index === 0) {
+            // 如果是第一个孩子 则为children
+            wipFiber.child = newFiber
+        } else {
+            // 如果不是 只能为兄弟
+            prevFiber.sibling = newFiber
+        }
+        prevFiber = newFiber
+
+        // 获取oldFiber的其他children
+        if (oldFiber) {
+            oldFiber = oldFiber.sibling
+        }
+        index++
+    }
+
+}
+
 // 执行工作函数
 function performUnitOfWork(fiber) {
-
     // 创建fiber的dom节点
     if (!fiber.dom) {
         fiber.dom = createDOM(fiber)
@@ -107,29 +231,35 @@ function performUnitOfWork(fiber) {
      * 为了确保界面一次性画完 就不能使用以上的方式来添加dom节点
      */
 
-    let prevFiber = null
-
-    // 为children创建fiber
     const children = fiber.props.children
-    for (let i = 0; i < children.length; i++) {
-        const newFiber = {
-            dom: null,
-            type: children[i].type,
-            props: children[i].props,
-            child: null,
-            parent: fiber,
-            sibling: null
-        }
 
-        if (i === 0) {
-            // 如果是第一个孩子 则为children
-            fiber.child = newFiber
-        } else {
-            // 如果不是 只能为兄弟
-            prevFiber.sibling = newFiber
-        }
-        prevFiber = newFiber
-    }
+
+    // 为children构建fiber
+    reconcileChildren(fiber, children)
+
+    // // 为children创建fiber
+    // const children = fiber.props.children
+    // for (let i = 0; i < children.length; i++) {
+    //     const newFiber = {
+    //         dom: null,
+    //         type: children[i].type,
+    //         props: children[i].props,
+    //         child: null,
+    //         parent: fiber,
+    //         sibling: null
+    //     }
+
+    //     if (i === 0) { 
+    //         // 如果是第一个孩子 则为children
+    //         fiber.child = newFiber
+    //     } else {
+    //         // 如果不是 只能为兄弟
+    //         prevFiber.sibling = newFiber
+    //     }
+    //     prevFiber = newFiber
+    // }
+
+
 
     // 优先返回 children
     if (fiber.child) {
